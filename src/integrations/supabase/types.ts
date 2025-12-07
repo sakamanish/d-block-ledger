@@ -14,7 +14,86 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      edit_logs: {
+        Row: {
+          edited_at: string
+          edited_by: string
+          field_changed: string
+          id: string
+          new_value: string | null
+          old_value: string | null
+          transaction_id: string
+        }
+        Insert: {
+          edited_at?: string
+          edited_by?: string
+          field_changed: string
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
+          transaction_id: string
+        }
+        Update: {
+          edited_at?: string
+          edited_by?: string
+          field_changed?: string
+          id?: string
+          new_value?: string | null
+          old_value?: string | null
+          transaction_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "edit_logs_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transactions: {
+        Row: {
+          amount: number
+          approved_by: string[]
+          category: string
+          created_at: string
+          created_by: string
+          date: string
+          description: string
+          id: string
+          last_edited_at: string
+          note: string | null
+          type: string
+        }
+        Insert: {
+          amount: number
+          approved_by: string[]
+          category: string
+          created_at?: string
+          created_by?: string
+          date: string
+          description: string
+          id?: string
+          last_edited_at?: string
+          note?: string | null
+          type: string
+        }
+        Update: {
+          amount?: number
+          approved_by?: string[]
+          category?: string
+          created_at?: string
+          created_by?: string
+          date?: string
+          description?: string
+          id?: string
+          last_edited_at?: string
+          note?: string | null
+          type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
