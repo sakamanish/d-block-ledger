@@ -1,173 +1,187 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { Transaction, EditLog, TransactionFormData } from "@/types/transaction";
+import { supabase } from "@/integrations/supabase/client";
+import { Category, ApproverRole } from "@/config/auth";
 
 interface TransactionContextType {
   transactions: Transaction[];
   editLogs: EditLog[];
   lastUpdated: string;
-  addTransaction: (data: TransactionFormData) => void;
-  updateTransaction: (id: string, data: TransactionFormData) => void;
-  deleteTransaction: (id: string) => void;
+  loading: boolean;
+  addTransaction: (data: TransactionFormData) => Promise<void>;
+  updateTransaction: (id: string, data: TransactionFormData) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
   getTransaction: (id: string) => Transaction | undefined;
+  refreshTransactions: () => Promise<void>;
 }
 
 const TransactionContext = createContext<TransactionContextType | undefined>(undefined);
-
-const STORAGE_KEY = "dblock_transactions";
-const LOGS_KEY = "dblock_edit_logs";
-
-// Generate sample data
-function generateSampleData(): Transaction[] {
-  const now = new Date();
-  const samples: Transaction[] = [];
-  
-  const sampleTransactions = [
-    { type: "income" as const, category: "Maintenance" as const, amount: 150000, description: "Monthly maintenance collection - May 2025", approvedBy: ["President", "Treasurer"] as const },
-    { type: "expense" as const, category: "Electricity" as const, amount: 28500, description: "Common area electricity bill - May 2025", approvedBy: ["Secretary", "Treasurer"] as const },
-    { type: "expense" as const, category: "Security" as const, amount: 35000, description: "Security guard salary - May 2025", approvedBy: ["President", "Secretary"] as const },
-    { type: "expense" as const, category: "Cleaning" as const, amount: 12000, description: "Housekeeping staff salary - May 2025", approvedBy: ["Vice President"] as const },
-    { type: "income" as const, category: "Maintenance" as const, amount: 148000, description: "Monthly maintenance collection - April 2025", approvedBy: ["President", "Treasurer"] as const },
-    { type: "expense" as const, category: "Repair" as const, amount: 8500, description: "Water tank cleaning and repair", approvedBy: ["President", "Secretary", "Treasurer"] as const },
-    { type: "expense" as const, category: "Water" as const, amount: 15000, description: "Water tanker charges - April 2025", approvedBy: ["Secretary"] as const },
-    { type: "expense" as const, category: "Lift Maintenance" as const, amount: 5000, description: "Quarterly lift maintenance", approvedBy: ["President", "Treasurer"] as const },
-    { type: "income" as const, category: "Festival" as const, amount: 25000, description: "Holi celebration fund collection", approvedBy: ["Vice President", "Secretary"] as const },
-    { type: "expense" as const, category: "Festival" as const, amount: 22000, description: "Holi celebration expenses", approvedBy: ["President", "Vice President", "Treasurer"] as const },
-    { type: "expense" as const, category: "Gardening" as const, amount: 3500, description: "Garden maintenance - plants and tools", approvedBy: ["Secretary"] as const },
-    { type: "income" as const, category: "Maintenance" as const, amount: 152000, description: "Monthly maintenance collection - March 2025", approvedBy: ["President", "Treasurer"] as const },
-  ];
-
-  sampleTransactions.forEach((t, index) => {
-    const date = new Date(now);
-    date.setDate(date.getDate() - (index * 5));
-    
-    samples.push({
-      id: `txn_${Date.now()}_${index}`,
-      type: t.type,
-      date: date.toISOString().split("T")[0],
-      amount: t.amount,
-      category: t.category,
-      description: t.description,
-      approvedBy: [...t.approvedBy],
-      createdBy: "admin_dblock",
-      createdAt: date.toISOString(),
-      lastEditedAt: date.toISOString(),
-    });
-  });
-
-  return samples;
-}
 
 export function TransactionProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [editLogs, setEditLogs] = useState<EditLog[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
+  const [loading, setLoading] = useState(true);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    const storedLogs = localStorage.getItem(LOGS_KEY);
-    
-    if (stored) {
-      setTransactions(JSON.parse(stored));
-    } else {
-      // Initialize with sample data
-      const sampleData = generateSampleData();
-      setTransactions(sampleData);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
-    }
-    
-    if (storedLogs) {
-      setEditLogs(JSON.parse(storedLogs));
-    }
-  }, []);
+  const fetchTransactions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-  // Save to localStorage whenever transactions change
-  useEffect(() => {
-    if (transactions.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
+      if (error) throw error;
+
+      const mapped: Transaction[] = (data || []).map((row) => ({
+        id: row.id,
+        type: row.type as "income" | "expense",
+        date: row.date,
+        amount: Number(row.amount),
+        category: row.category as Category,
+        description: row.description,
+        approvedBy: (row.approved_by || []) as ApproverRole[],
+        note: row.note || undefined,
+        createdBy: row.created_by,
+        createdAt: row.created_at,
+        lastEditedAt: row.last_edited_at,
+      }));
+
+      setTransactions(mapped);
       setLastUpdated(new Date().toISOString());
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+    } finally {
+      setLoading(false);
     }
-  }, [transactions]);
-
-  useEffect(() => {
-    if (editLogs.length > 0) {
-      localStorage.setItem(LOGS_KEY, JSON.stringify(editLogs));
-    }
-  }, [editLogs]);
-
-  const addTransaction = useCallback((data: TransactionFormData) => {
-    const now = new Date().toISOString();
-    const newTransaction: Transaction = {
-      id: `txn_${Date.now()}`,
-      ...data,
-      createdBy: "admin_dblock",
-      createdAt: now,
-      lastEditedAt: now,
-    };
-    setTransactions((prev) => [newTransaction, ...prev]);
   }, []);
 
-  const updateTransaction = useCallback((id: string, data: TransactionFormData) => {
-    const now = new Date().toISOString();
-    
-    setTransactions((prev) => {
-      const oldTransaction = prev.find((t) => t.id === id);
-      if (!oldTransaction) return prev;
+  const fetchEditLogs = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("edit_logs")
+        .select("*")
+        .order("edited_at", { ascending: false });
 
-      // Create edit logs for changed fields
-      const newLogs: EditLog[] = [];
-      const fields: (keyof TransactionFormData)[] = ["type", "date", "amount", "category", "description", "note"];
-      
-      fields.forEach((field) => {
-        const oldValue = String(oldTransaction[field] ?? "");
-        const newValue = String(data[field] ?? "");
-        if (oldValue !== newValue) {
-          newLogs.push({
-            id: `log_${Date.now()}_${field}`,
-            transactionId: id,
-            fieldChanged: field,
-            oldValue,
-            newValue,
-            editedAt: now,
-            editedBy: "admin_dblock",
-          });
-        }
-      });
+      if (error) throw error;
 
-      // Check approvedBy changes
-      const oldApprovers = oldTransaction.approvedBy.sort().join(", ");
-      const newApprovers = data.approvedBy.sort().join(", ");
-      if (oldApprovers !== newApprovers) {
-        newLogs.push({
-          id: `log_${Date.now()}_approvedBy`,
-          transactionId: id,
-          fieldChanged: "approvedBy",
-          oldValue: oldApprovers,
-          newValue: newApprovers,
-          editedAt: now,
-          editedBy: "admin_dblock",
+      const mapped: EditLog[] = (data || []).map((row) => ({
+        id: row.id,
+        transactionId: row.transaction_id,
+        fieldChanged: row.field_changed,
+        oldValue: row.old_value || "",
+        newValue: row.new_value || "",
+        editedAt: row.edited_at,
+        editedBy: row.edited_by,
+      }));
+
+      setEditLogs(mapped);
+    } catch (error) {
+      console.error("Error fetching edit logs:", error);
+    }
+  }, []);
+
+  const refreshTransactions = useCallback(async () => {
+    await Promise.all([fetchTransactions(), fetchEditLogs()]);
+  }, [fetchTransactions, fetchEditLogs]);
+
+  useEffect(() => {
+    refreshTransactions();
+  }, [refreshTransactions]);
+
+  const addTransaction = useCallback(async (data: TransactionFormData) => {
+    const { error } = await supabase.from("transactions").insert({
+      type: data.type,
+      date: data.date,
+      amount: data.amount,
+      category: data.category,
+      description: data.description,
+      approved_by: data.approvedBy,
+      note: data.note || null,
+      created_by: "admin_dblock",
+    });
+
+    if (error) {
+      console.error("Error adding transaction:", error);
+      throw error;
+    }
+
+    await refreshTransactions();
+  }, [refreshTransactions]);
+
+  const updateTransaction = useCallback(async (id: string, data: TransactionFormData) => {
+    const oldTransaction = transactions.find((t) => t.id === id);
+    if (!oldTransaction) return;
+
+    // Create edit logs for changed fields
+    const fields: (keyof TransactionFormData)[] = ["type", "date", "amount", "category", "description", "note"];
+    const logsToInsert: { transaction_id: string; field_changed: string; old_value: string; new_value: string; edited_by: string }[] = [];
+
+    fields.forEach((field) => {
+      const oldValue = String(oldTransaction[field] ?? "");
+      const newValue = String(data[field] ?? "");
+      if (oldValue !== newValue) {
+        logsToInsert.push({
+          transaction_id: id,
+          field_changed: field,
+          old_value: oldValue,
+          new_value: newValue,
+          edited_by: "admin_dblock",
         });
       }
-
-      if (newLogs.length > 0) {
-        setEditLogs((prevLogs) => [...newLogs, ...prevLogs]);
-      }
-
-      return prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              ...data,
-              lastEditedAt: now,
-            }
-          : t
-      );
     });
-  }, []);
 
-  const deleteTransaction = useCallback((id: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+    // Check approvedBy changes
+    const oldApprovers = oldTransaction.approvedBy.sort().join(", ");
+    const newApprovers = data.approvedBy.sort().join(", ");
+    if (oldApprovers !== newApprovers) {
+      logsToInsert.push({
+        transaction_id: id,
+        field_changed: "approvedBy",
+        old_value: oldApprovers,
+        new_value: newApprovers,
+        edited_by: "admin_dblock",
+      });
+    }
+
+    // Insert edit logs
+    if (logsToInsert.length > 0) {
+      const { error: logError } = await supabase.from("edit_logs").insert(logsToInsert);
+      if (logError) console.error("Error inserting edit logs:", logError);
+    }
+
+    // Update transaction
+    const { error } = await supabase
+      .from("transactions")
+      .update({
+        type: data.type,
+        date: data.date,
+        amount: data.amount,
+        category: data.category,
+        description: data.description,
+        approved_by: data.approvedBy,
+        note: data.note || null,
+      })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error updating transaction:", error);
+      throw error;
+    }
+
+    await refreshTransactions();
+  }, [transactions, refreshTransactions]);
+
+  const deleteTransaction = useCallback(async (id: string) => {
+    const { error } = await supabase.from("transactions").delete().eq("id", id);
+
+    if (error) {
+      console.error("Error deleting transaction:", error);
+      throw error;
+    }
+
+    await refreshTransactions();
+  }, [refreshTransactions]);
 
   const getTransaction = useCallback(
     (id: string) => transactions.find((t) => t.id === id),
@@ -180,10 +194,12 @@ export function TransactionProvider({ children }: { children: React.ReactNode })
         transactions,
         editLogs,
         lastUpdated,
+        loading,
         addTransaction,
         updateTransaction,
         deleteTransaction,
         getTransaction,
+        refreshTransactions,
       }}
     >
       {children}
