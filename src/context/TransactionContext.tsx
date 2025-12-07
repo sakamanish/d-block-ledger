@@ -15,6 +15,7 @@ const TransactionContext = createContext<TransactionContextType | undefined>(und
 
 const STORAGE_KEY = "dblock_transactions";
 const LOGS_KEY = "dblock_edit_logs";
+const INITIALIZED_KEY = "dblock_initialized";
 
 // Generate sample data
 function generateSampleData(): Transaction[] {
@@ -66,14 +67,16 @@ export function TransactionProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     const storedLogs = localStorage.getItem(LOGS_KEY);
+    const isInitialized = localStorage.getItem(INITIALIZED_KEY);
     
     if (stored) {
       setTransactions(JSON.parse(stored));
-    } else {
-      // Initialize with sample data
+    } else if (!isInitialized) {
+      // Initialize with sample data only if never initialized before
       const sampleData = generateSampleData();
       setTransactions(sampleData);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleData));
+      localStorage.setItem(INITIALIZED_KEY, "true");
     }
     
     if (storedLogs) {
